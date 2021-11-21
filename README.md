@@ -1,8 +1,5 @@
-# OutlanderPHEVBMS
-Control Over the Mistubishi Outlander CMU modules
+# SimpBMS for bq76PL455A
+SimpBMS fork covering communication with bq76PL455A using the daisychain
+to CAN adapter found at https://github.com/catphish/lg-daisychain
 
-Reading out the modules over CAN and triggering them to balance.
-
-This software is designed to run on the SimpBMS.
-
-User Manual that covers some software functions https://github.com/tomdebree/SimpBMS 
+Work in progress.
