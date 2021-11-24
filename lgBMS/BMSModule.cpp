@@ -3,8 +3,23 @@
 #include "BMSUtil.h"
 #include "Logger.h"
 
-BMSModule::BMSModule()
-{
+BMSModule::BMSModule() {
+  clearModule();
+}
+
+void BMSModule::clearModule() {
+  dataReceived = 0;
+  lastData = 0;
+  for(int n=0; n<16; n++) {
+    cellVolt[n] = 0;
+    lowestCellVolt[n] = 5.0f;
+    highestCellVolt[n] = 0.0f;
+  }
+  for(int n=0; n<2; n++) {
+    temperature[n] = 0;
+    lowestTemperature[n] = 200.0f;
+    highestTemperature[n] = -200.0f;
+  }
 }
 
 // Convert a 16-bit ADC value to a float voltage
@@ -24,17 +39,16 @@ float BMSModule::decodeTemperature(uint16_t data) {
 // Decode an incoming CAN message. This function assumes that the
 // CAN messages relates to this module.
 void BMSModule::decodecan(CAN_message_t &msg) {
-  // We're receiving data from this module, so it exists
-  exists = true;
   // Extract 16 bit data vale from CAN message
-  uint16_t data = ((uint16_t)(message->data[2]) << 8) | message->data[3];
-  uint8_t cell = buf[1];
+  uint16_t data = ((uint16_t)(msg.buf[2]) << 8) | msg.buf[3];
+  uint8_t cell = msg.buf[1];
   // Update the received data bitmap to indicate what has been received
   dataReceived |= (1 << cell);
+  lastData = millis();
   // Store the received data and update the high and low points
   if(cell < 16) {
     // Cell voltages
-    cellVolt[buf[1]] = decodeVoltage(data);
+    cellVolt[cell] = decodeVoltage(data);
     if(cellVolt[cell] < lowestCellVolt[cell])  lowestCellVolt[cell]  = cellVolt[cell];
     if(cellVolt[cell] > highestCellVolt[cell]) highestCellVolt[cell] = cellVolt[cell];
   } else if(cell == 17) {
@@ -76,7 +90,7 @@ float BMSModule::getLowCellV() {
 float BMSModule::getHighCellV() {
   float highCellV = 0.0f;
   for(int n=0; n<16; n++)
-    if(cellVolt[n] < highCellV)
+    if(cellVolt[n] > highCellV)
       highCellV = cellVolt[n];
   return highCellV;
 }
@@ -121,4 +135,19 @@ float BMSModule::getLowestTemp(int sensor)
 uint16_t BMSModule::getBalStat()
 {
   return balstat;
+}
+
+// Returns true if module data is valid / complete.
+bool BMSModule::isDataValid() {
+  if(millis() - lastData > 5000) return false;
+  if(dataReceived & 0xffffff == 0xffffff) return true;
+  return false;
+}
+
+// Return sum of cell voltages
+float BMSModule::getModuleVoltage() {
+  float moduleVoltage = 0.0f;
+  for(int n=0; n<16; n++) 
+    moduleVoltage += cellVolt[n];
+  return moduleVoltage;
 }

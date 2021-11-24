@@ -120,7 +120,7 @@ int pwmcurmid = 50;//Mid point for pwm dutycycle based on current
 int16_t pwmcurmin = 0;//DONOT fill in, calculated later based on other values
 
 //variables for VE driect bus comms
-char* myStrings[] = {"V", "14674", "I", "0", "CE", "-1", "SOC", "800", "TTG", "-1", "Alarm", "OFF", "Relay", "OFF", "AR", "0", "BMV", "600S", "FW", "212", "H1", "-3", "H2", "-3", "H3", "0", "H4", "0", "H5", "0", "H6", "-7", "H7", "13180", "H8", "14774", "H9", "137", "H10", "0", "H11", "0", "H12", "0"};
+const char* myStrings[] = {"V", "14674", "I", "0", "CE", "-1", "SOC", "800", "TTG", "-1", "Alarm", "OFF", "Relay", "OFF", "AR", "0", "BMV", "600S", "FW", "212", "H1", "-3", "H2", "-3", "H3", "0", "H4", "0", "H5", "0", "H6", "-7", "H7", "13180", "H8", "14774", "H9", "137", "H10", "0", "H11", "0", "H12", "0"};
 
 //variables for VE can
 uint16_t chargevoltage = 49100; //max charge voltage in mv
@@ -235,8 +235,6 @@ void loadSettings()
   settings.ChargeTSetpoint = 0.0f;
   settings.DisTSetpoint = 40.0f;
   settings.WarnToff = 5.0f; //temp offset before raising warning
-  settings.IgnoreTemp = 0; // 0 - use both sensors, 1 or 2 only use that sensor
-  settings.IgnoreVolt = 0.5;//
   settings.balanceVoltage = 3.9f;
   settings.balanceHyst = 0.04f;
   settings.logLevel = 2;
@@ -410,7 +408,6 @@ void setup()
   myTimer.begin(Can0callback, 10000); //cally every x ms
 
   bms.setPstrings(settings.Pstrings);
-  bms.setSensors(settings.IgnoreTemp, settings.IgnoreVolt, settings.TempConv, settings.TempOff);
 
   ///precharge timer kickers
   Pretimer = millis();
@@ -838,7 +835,7 @@ void loop()
   if (millis() - looptime > 500)
   {
     looptime = millis();
-    bms.getAllVoltTemp();
+    //bms.getAllVoltTemp();
     //UV  check
     if (settings.ESSmode == 1)
     {
@@ -923,7 +920,6 @@ void loop()
       if (cellspresent == 0 )
       {
         cellspresent = bms.seriescells();
-        bms.setSensors(settings.IgnoreTemp, settings.IgnoreVolt, settings.TempConv, settings.TempOff);
       }
       else
       {
@@ -936,6 +932,15 @@ void loop()
             SERIALCONSOLE.println("  ");
             bmsstatus = Error;
             ErrorReason = ErrorReason | 0x04;
+          }
+          // Reset the modules
+          msg.id  = 0x4f8;
+          msg.len = 1;
+          msg.buf[0] = 0x01;
+          if (Can0.write(msg) == 0 && sendCnt < sendbufsize)
+          {
+            msgbuf[sendCnt] = msg;
+            sendCnt++;
           }
         }
         else
@@ -951,44 +956,6 @@ void loop()
     if (CSVdebug != 1)
     {
       dashupdate(); //Info on serial bus 2
-    }
-
-    if (millis() - cleartime > 10000)
-    {
-      if (SOCset == 1)
-      {
-        if (bms.checkcomms())
-        {
-          //no missing modules
-          /*
-            SERIALCONSOLE.println("  ");
-            SERIALCONSOLE.print(" ALL OK NO MODULE MISSING :) ");
-            SERIALCONSOLE.println("  ");
-          */
-          /*
-            if (  bmsstatus == Error)
-            {
-            bmsstatus = Boot;
-            }
-          */
-          ErrorReason = ErrorReason & ~0x08;
-        }
-        else
-        {
-          //missing module
-          if (debug != 0)
-          {
-            SERIALCONSOLE.println("  ");
-            SERIALCONSOLE.print("   !!! MODULE MISSING !!!");
-            SERIALCONSOLE.println("  ");
-          }
-          bmsstatus = Error;
-          ErrorReason = 2;
-          ErrorReason = ErrorReason | 0x08;
-        }
-        bms.clearmodules();
-      }
-      cleartime = millis();
     }
 
     resetwdog();
@@ -1894,26 +1861,19 @@ void VEcan() //communication with Victron system over CAN
   {
     if (bms.getLowCellVolt() + settings.balanceHyst < bms.getHighCellVolt())
     {
-      msg.id  = 0x3c3;
-      msg.len = 8;
+      msg.id  = 0x4f8;
+      msg.len = 3;
+      msg.buf[0] =  0x00;
       if (bms.getLowCellVolt() < settings.balanceVoltage)
       {
-        msg.buf[0] = highByte(uint16_t(settings.balanceVoltage * 1000));
-        msg.buf[1] = lowByte(uint16_t(settings.balanceVoltage * 1000));
+        msg.buf[1] = highByte(uint16_t(settings.balanceVoltage * 65535.0f / 5.0f));
+        msg.buf[2] = lowByte(uint16_t(settings.balanceVoltage * 65535.0f / 5.0f));
       }
       else
       {
-        msg.buf[0] = highByte(uint16_t(bms.getLowCellVolt() * 1000));
-        msg.buf[1] = lowByte(uint16_t(bms.getLowCellVolt() * 1000));
+        msg.buf[1] = highByte(uint16_t(bms.getLowCellVolt() * 65535.0f / 5.0f));
+        msg.buf[2] = lowByte(uint16_t(bms.getLowCellVolt() * 65535.0f / 5.0f));
       }
-      msg.buf[2] =  0x01;
-      msg.buf[3] =  0x04;
-      msg.buf[4] =  0x03;
-      msg.buf[5] =  0x00;
-      msg.buf[6] =  0x00;
-      msg.buf[7] = 0x00;
-
-
       if (Can0.write(msg) == 0 && sendCnt < sendbufsize)
       {
         msgbuf[sendCnt] = msg;
@@ -2215,77 +2175,6 @@ void menu()
         break;
     }
   }
-
-  if (menuload == 8)
-  {
-    switch (incomingByte)
-    {
-      case '1': //e dispaly settings
-        if (Serial.available() > 0)
-        {
-          settings.IgnoreTemp = Serial.parseInt();
-        }
-        if (settings.IgnoreTemp > 3)
-        {
-          if (settings.IgnoreTemp == 23 || settings.IgnoreTemp == 12 || settings.IgnoreTemp == 13)
-          {
-
-          }
-          else
-          {
-            settings.IgnoreTemp = 0;
-          }
-        }
-        bms.setSensors(settings.IgnoreTemp, settings.IgnoreVolt, settings.TempConv, settings.TempOff);
-        menuload = 1;
-        incomingByte = 'i';
-        break;
-
-      case '2':
-        if (Serial.available() > 0)
-        {
-          settings.IgnoreVolt = Serial.parseInt();
-          settings.IgnoreVolt = settings.IgnoreVolt * 0.001;
-          bms.setSensors(settings.IgnoreTemp, settings.IgnoreVolt, settings.TempConv, settings.TempOff);
-          // Serial.println(settings.IgnoreVolt);
-          menuload = 1;
-          incomingByte = 'i';
-        }
-        break;
-
-      case '3':
-        if (Serial.available() > 0)
-        {
-          settings.TempConv = Serial.parseInt();
-          settings.TempConv = settings.TempConv * 0.0001;
-          bms.setSensors(settings.IgnoreTemp, settings.IgnoreVolt, settings.TempConv, settings.TempOff);
-          // Serial.println(settings.IgnoreVolt);
-          menuload = 1;
-          incomingByte = 'i';
-        }
-        break;
-
-      case '4':
-        if (Serial.available() > 0)
-        {
-          settings.TempOff = Serial.parseInt();
-          settings.TempOff = settings.TempOff * -1;
-          bms.setSensors(settings.IgnoreTemp, settings.IgnoreVolt, settings.TempConv, settings.TempOff);
-          // Serial.println(settings.IgnoreVolt);
-          menuload = 1;
-          incomingByte = 'i';
-        }
-        break;
-
-      case 113: //q to go back to main menu
-
-        menuload = 0;
-        incomingByte = 115;
-        break;
-    }
-  }
-
-
 
   if (menuload == 7)
   {
@@ -2744,7 +2633,7 @@ void menu()
       case 'R'://restart
         CPU_REBOOT ;
         break;
-      case 'x': //Ignore Value Settings
+      case 'x': //Expansion Settings
         while (Serial.available()) {
           Serial.read();
         }
@@ -2768,29 +2657,6 @@ void menu()
         SERIALCONSOLE.println("q - Go back to menu");
         menuload = 9;
         break;
-      case 'i': //Ignore Value Settings
-        while (Serial.available()) {
-          Serial.read();
-        }
-        SERIALCONSOLE.println();
-        SERIALCONSOLE.println();
-        SERIALCONSOLE.println();
-        SERIALCONSOLE.println();
-        SERIALCONSOLE.println();
-        SERIALCONSOLE.println("Ignore Value Settings");
-        SERIALCONSOLE.print("1 - Temp Sensor Setting:");
-        SERIALCONSOLE.println(settings.IgnoreTemp);
-        SERIALCONSOLE.print("2 - Voltage Under Which To Ignore Cells:");
-        SERIALCONSOLE.print(settings.IgnoreVolt * 1000, 0);
-        SERIALCONSOLE.println("mV");
-        SERIALCONSOLE.print("3 - Temp Scaling Setting:");
-        SERIALCONSOLE.println(settings.TempConv, 4);
-        SERIALCONSOLE.print("4 - Temp Offset Setting:");
-        SERIALCONSOLE.println(settings.TempOff);
-        SERIALCONSOLE.println("q - Go back to menu");
-        menuload = 8;
-        break;
-
       case 'e': //Charging settings
         while (Serial.available()) {
           Serial.read();
@@ -3047,7 +2913,7 @@ void menu()
 
         if ( settings.cursens == Canbus)
         {
-          SERIALCONSOLE.print("7 -Can Current Sensor :");
+          SERIALCONSOLE.print("7 - Can Current Sensor :");
           if (settings.curcan == LemCAB300)
           {
             SERIALCONSOLE.println(" LEM CAB300/500 series ");
@@ -3166,7 +3032,7 @@ void menu()
     }
   }
 
-  if (incomingByte == 115 & menuload == 0)
+  if (incomingByte == 115 && menuload == 0)
   {
     SERIALCONSOLE.println();
     SERIALCONSOLE.println("MENU");
@@ -3178,7 +3044,6 @@ void menu()
     SERIALCONSOLE.println("e - Charging Settings");
     SERIALCONSOLE.println("c - Current Sensor Calibration");
     SERIALCONSOLE.println("k - Contactor and Gauge Settings");
-    SERIALCONSOLE.println("i - Ignore Value Settings");
     SERIALCONSOLE.println("d - Debug Settings");
     SERIALCONSOLE.println("x - Expansion Settings");
     SERIALCONSOLE.println("R - Restart BMS");
@@ -3256,15 +3121,9 @@ void canread()
       handleVictronLynx();
     }
   }
-
-  if (inMsg.id > 0x600 && inMsg.id < 0x800)//do mitsubishi magic if ids are ones identified to be modules
+  if ((inMsg.id & 0xFFFFFFFC) == 0x4f0)
   {
-    bms.decodecan(inMsg);//do mitsubishi magic if ids are ones identified to be modules
-  }
-
-  if (inMsg.id > 0x80000600 && inMsg.id < 0x80000800) //do mitsubishi magic if ids are ones identified to be modules
-  {
-    bms.decodecan(inMsg);//do mitsubishi magic if ids are ones identified to be modules
+    bms.decodecan(inMsg);
   }
 
   if (debug == 1)
